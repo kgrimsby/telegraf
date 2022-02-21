@@ -31,6 +31,8 @@ type Parser struct {
 	iterateObjects bool
 	// objectConfig contains the config for an object, some info is needed while iterating over the gjson results
 	objectConfig JSONObject
+	// Current config used when iterating through configs and running other methods
+	currentConfig Config
 }
 
 type PathResult struct {
@@ -45,6 +47,7 @@ type Config struct {
 	TimestampPath       string `toml:"timestamp_path"`        // OPTIONAL
 	TimestampFormat     string `toml:"timestamp_format"`      // OPTIONAL, but REQUIRED when timestamp_path is defined
 	TimestampTimezone   string `toml:"timestamp_timezone"`    // OPTIONAL, but REQUIRES timestamp_path
+	Optional            bool   `toml:"optional"`              // Will suppress errors if there isn't a match with Path
 
 	Fields      []DataSet
 	Tags        []DataSet
@@ -58,8 +61,7 @@ type DataSet struct {
 }
 
 type JSONObject struct {
-	Path               string            `toml:"path"`     // REQUIRED
-	Optional           bool              `toml:"optional"` // Will suppress errors if there isn't a match with Path
+	Path               string            `toml:"path"` // REQUIRED
 	TimestampKey       string            `toml:"timestamp_key"`
 	TimestampFormat    string            `toml:"timestamp_format"`   // OPTIONAL, but REQUIRED when timestamp_path is defined
 	TimestampTimezone  string            `toml:"timestamp_timezone"` // OPTIONAL, but REQUIRES timestamp_path
@@ -100,6 +102,8 @@ func (p *Parser) Parse(input []byte) ([]telegraf.Metric, error) {
 	var metrics []telegraf.Metric
 
 	for _, c := range p.Configs {
+		p.currentConfig = c
+
 		// Measurement name can either be hardcoded, or parsed from the JSON using a GJSON path expression
 		p.measurementName = c.MeasurementName
 		if c.MeasurementNamePath != "" {
@@ -114,7 +118,7 @@ func (p *Parser) Parse(input []byte) ([]telegraf.Metric, error) {
 		if c.TimestampPath != "" {
 			result := gjson.GetBytes(input, c.TimestampPath)
 
-			if result.Type == gjson.Null {
+			if !result.Exists() {
 				p.Log.Debugf("Message: %s", input)
 				return nil, fmt.Errorf(GJSONPathNUllErrorMSG)
 			}
@@ -182,7 +186,11 @@ func (p *Parser) processMetric(input []byte, data []DataSet, tag bool, timestamp
 			return nil, fmt.Errorf("GJSON path is required")
 		}
 		result := gjson.GetBytes(input, c.Path)
-		if result.Type == gjson.Null {
+		if !result.Exists() {
+			if p.currentConfig.Optional {
+				continue
+			}
+
 			return nil, fmt.Errorf(GJSONPathNUllErrorMSG)
 		}
 
@@ -410,15 +418,24 @@ func (p *Parser) processObjects(input []byte, objects []JSONObject, timestamp ti
 		if c.Path == "" {
 			return nil, fmt.Errorf("GJSON path is required")
 		}
+		
 
 		result := gjson.GetBytes(input, c.Path)
-		if result.Type == gjson.Null {
-			if c.Optional {
-				// If path is marked as optional don't error if path doesn't return a result
-				p.Log.Debugf(GJSONPathNUllErrorMSG)
-				return nil, nil
-			}
 
+		fmt.Println(c.Path)
+		fmt.Println(result.Exists())
+		fmt.Println(p.currentConfig.Optional)
+		fmt.Println(string(input))
+		
+		if !result.Exists() && p.currentConfig.Optional {
+			// If path is marked as optional don't error if path doesn't return a result
+			p.Log.Debugf(GJSONPathNUllErrorMSG)
+			fmt.Println("Continuing..")
+			//return nil, nil
+			continue
+		}
+
+		if !result.Exists() {
 			return nil, fmt.Errorf(GJSONPathNUllErrorMSG)
 		}
 
@@ -426,7 +443,11 @@ func (p *Parser) processObjects(input []byte, objects []JSONObject, timestamp ti
 		for _, f := range c.FieldPaths {
 			var r PathResult
 			r.result = gjson.GetBytes(scopedJSON, f.Path)
-			if r.result.Type == gjson.Null {
+			if !r.result.Exists() {
+				fmt.Println("Field missing")
+				fmt.Println(f.Path)
+				fmt.Println(c.Path)
+				fmt.Println(p.currentConfig.Optional)
 				return nil, fmt.Errorf(GJSONPathNUllErrorMSG)
 			}
 			r.DataSet = f
@@ -436,7 +457,8 @@ func (p *Parser) processObjects(input []byte, objects []JSONObject, timestamp ti
 		for _, f := range c.TagPaths {
 			var r PathResult
 			r.result = gjson.GetBytes(scopedJSON, f.Path)
-			if r.result.Type == gjson.Null {
+			if !r.result.Exists() {
+				fmt.Println("Tag missing")
 				return nil, fmt.Errorf(GJSONPathNUllErrorMSG)
 			}
 			r.DataSet = f

@@ -1643,6 +1643,7 @@ func (c *Config) getParserConfig(name string, tbl *ast.Table) (*parsers.Config, 
 				c.getFieldString(metricConfig, "timestamp_path", &mc.TimestampPath)
 				c.getFieldString(metricConfig, "timestamp_format", &mc.TimestampFormat)
 				c.getFieldString(metricConfig, "timestamp_timezone", &mc.TimestampTimezone)
+				c.getFieldBool(metricConfig, "optional", &mc.Optional)
 
 				mc.Fields = getFieldSubtable(c, metricConfig)
 				mc.Tags = getTagSubtable(c, metricConfig)
@@ -1652,7 +1653,6 @@ func (c *Config) getParserConfig(name string, tbl *ast.Table) (*parsers.Config, 
 						for _, objectConfig := range objectconfigs {
 							var o json_v2.JSONObject
 							c.getFieldString(objectConfig, "path", &o.Path)
-							c.getFieldBool(objectConfig, "optional", &o.Optional)
 							c.getFieldString(objectConfig, "timestamp_key", &o.TimestampKey)
 							c.getFieldString(objectConfig, "timestamp_format", &o.TimestampFormat)
 							c.getFieldString(objectConfig, "timestamp_timezone", &o.TimestampTimezone)
